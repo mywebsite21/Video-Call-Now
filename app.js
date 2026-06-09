@@ -1,4 +1,4 @@
-import { initializeApp } from "https://www.gstaticgstatic.com/firebasejs/11.0.1/firebase-app.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
 import {
   getFirestore,
   collection,
@@ -46,6 +46,9 @@ try {
     console.warn(
       "⚠️ Firebase is not configured. Running with mock data for demonstration.",
     );
+  }
+} catch (error) {
+  console.warn("Firebase init error:", error);
 }
 
 // ==========================================
@@ -53,13 +56,14 @@ try {
 // ==========================================
 const defaultPermissions = {
   allowCustomURL: false,
+  allowExport: false,
   allowTelegramEdit: false,
   allowMemberMgmt: false,
   allowExcelDownload: false,
   allowSearch: false,
 };
-pepermissionDefinitionsprmissionDefinitions
-const pepermissionDefinitionsppepermissionDefinitionsprmissionDefinitionsrmissionDefinitions = [
+
+const permissionDefinitions = [
   {
     id: "allowCustomURL",
     name: "Custom URL Creation",
@@ -104,20 +108,6 @@ let mockAdmins = [
       allowTelegramEdit: true,
     },
   },
-  {
-    id: "ADM-002",
-    username: "PipsMaster",
-    email: "pips@example.com",
-    status: "pending",
-    permissions: { ...defaultPermissions },
-  },
-  {
-    id: "ADM-003",
-    username: "GoldBull",
-    email: "gold@example.com",
-    status: "blocked",
-    permissions: { ...defaultPermissions },
-  },
 ];
 
 let mockMembers = [
@@ -127,24 +117,10 @@ let mockMembers = [
     telegram: "@johnd",
     whatsapp: "+1234567890",
     joinedDate: "2026-06-01",
-  },
-  {
-    id: "MEM-102",
-    name: "Sarah Smith",
-    telegram: "@sarahs",
-    whatsapp: "+0987654321",
-    joinedDate: "2026-06-05",
-  },
-  {
-    id: "MEM-103",
-    name: "Mike Chen",
-    telegram: "@mikec",
-    whatsapp: "+1122334455",
-    joinedDate: "2026-06-08",
-  },
+    referralAdmin: "Ovi",
+    referralLink: "https://mywebsite21.github.io/Ads-Point-BD/?ref=Ovi"
+  }
 ];
-
-// Global permissions have been migrated to per-admin basis
 
 // ==========================================
 // 3. UI logic & Navigation
@@ -214,7 +190,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
       try {
         if (isFirebaseConfigured) {
-          await deleteDoc(doc(db, "registrations", memberToDelete));
+          // You might need to change "registrations" to "CommunityMembers" if that's what your main site uses
+          await deleteDoc(doc(db, "CommunityMembers", memberToDelete));
         } else {
           mockMembers = mockMembers.filter((m) => m.id !== memberToDelete);
           renderMembers();
@@ -223,10 +200,7 @@ document.addEventListener("DOMContentLoaded", () => {
         window.closeDeleteModal();
       } catch (err) {
         console.error("Error deleting member: ", err);
-        alert(
-          "Failed to delete member. Make sure you have updated Firestore rules to allow read/write on /registrations. Error: " +
-            err.message,
-        );
+        alert("Failed to delete member: " + err.message);
         window.closeDeleteModal();
       } finally {
         btn.innerText = "Delete";
@@ -259,43 +233,24 @@ function setupFirebaseListeners() {
       renderAdmins();
       renderDashboard();
 
-      // Update modal if it's currently open
       if (currentEditingAdminId) {
         window.openAdminSettings(currentEditingAdminId);
       }
     },
     (error) => {
       console.warn("Firebase Admins Listener Warning:", error);
-      // Silently handle error or show in UI without blocking alert
-      const tbody = document.getElementById("admins-table-body");
-      if (tbody)
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem; color: var(--text-light);">
-            <strong style="color: var(--danger);">Firestore Database Permission Denied</strong><br><br>
-            Please go to your <a href="https://console.firebase.google.com/" target="_blank" style="color:#007bff; text-decoration:underline;">Firebase Console</a> &gt; <strong>Firestore Database</strong> &gt; <strong>Rules</strong> and update them EXACTLY to this:<br>
-            <pre style="background: rgba(0,0,0,0.3); color: #fff; padding: 1rem; border-radius: 8px; margin: 1rem auto; text-align: left; max-width: 450px; font-size: 0.85rem;">rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /admins/{document=**} {\n      allow read, write: if request.auth != null;\n    }\n    match /members/{document=**} {\n      allow read, write: if true;\n    }\n  }\n}</pre>
-            <i>After publishing the rules, refresh this page, and your Main Site will also work perfectly.</i>
-        </td></tr>`;
-    },
+    }
   );
 
-  // Listen to Members
+  // Listen to Members (Note: Using CommunityMembers from your frontend code)
   unsubMembers = onSnapshot(
-    collection(db, "registrations"),
+    collection(db, "CommunityMembers"),
     (snapshot) => {
       mockMembers = [];
       snapshot.forEach((doc) => {
         const data = doc.data();
-        let joinedDate = data.joinedDate || data.date || "N/A";
-        const timeField = data.createdAt || data.timestamp || data.created_at;
-
-        if (timeField && typeof timeField.toDate === "function") {
-          joinedDate = timeField.toDate().toLocaleDateString();
-        } else if (timeField && timeField.seconds) {
-          joinedDate = new Date(timeField.seconds * 1000).toLocaleDateString();
-        } else if (timeField) {
-          joinedDate = new Date(timeField).toLocaleDateString() || timeField;
-        }
-
+        let joinedDate = data.registrationDate || data.joinedDate || data.date || "N/A";
+        
         mockMembers.push({
           id: doc.id,
           ...data,
@@ -303,24 +258,10 @@ function setupFirebaseListeners() {
         });
       });
 
+      // Sort by timestamp if available
       mockMembers.sort((a, b) => {
-        const getT = (obj) => {
-          const timeField = obj.createdAt || obj.timestamp || obj.created_at;
-          if (!timeField && !obj.joinedDate && !obj.date) return 0;
-          if (timeField) {
-            if (typeof timeField.toDate === "function")
-              return timeField.toDate().getTime();
-            if (timeField.seconds) return timeField.seconds * 1000;
-            const d = new Date(timeField).getTime();
-            if (!isNaN(d)) return d;
-          }
-          if (obj.joinedDate || obj.date) {
-            const d = new Date(obj.joinedDate || obj.date).getTime();
-            if (!isNaN(d)) return d;
-          }
-          return 0;
-        };
-        return getT(b) - getT(a);
+        if(b.timestamp && a.timestamp) return b.timestamp - a.timestamp;
+        return 0;
       });
 
       renderMembers();
@@ -328,33 +269,20 @@ function setupFirebaseListeners() {
     },
     (error) => {
       console.warn("Firebase Members Listener Warning:", error);
-      // Silently handle error or show in UI without blocking alert
-      const tbody = document.getElementById("members-table-body");
-      if (tbody)
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding: 2rem; color: var(--text-light);">
-            <strong style="color: var(--danger);">Firestore Database Permission Denied</strong><br><br>
-            Please go to your <a href="https://console.firebase.google.com/" target="_blank" style="color:#007bff; text-decoration:underline;">Firebase Console</a> &gt; <strong>Firestore Database</strong> &gt; <strong>Rules</strong> and update them EXACTLY to this:<br>
-            <pre style="background: rgba(0,0,0,0.3); color: #fff; padding: 1rem; border-radius: 8px; margin: 1rem auto; text-align: left; max-width: 450px; font-size: 0.85rem;">rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /admins/{document=**} {\n      allow read, write: if request.auth != null;\n    }\n    match /registrations/{document=**} {\n      allow read, write: if true;\n    }\n  }\n}</pre>
-            <i>After publishing the rules, refresh this page, and your Main Site will also work perfectly.</i>
-        </td></tr>`;
-    },
+    }
   );
 }
 
 function initNavigation() {
-  const navItems = document.querySelectorAll(
-    ".sidebar-nav .nav-item[data-target]",
-  );
+  const navItems = document.querySelectorAll(".sidebar-nav .nav-item[data-target]");
   const sections = document.querySelectorAll(".section-content");
 
   navItems.forEach((item) => {
     item.addEventListener("click", (e) => {
       e.preventDefault();
-      // Remove active classes
       navItems.forEach((n) => n.classList.remove("active"));
       sections.forEach((s) => s.classList.remove("active"));
 
-      // Add active class to clicked
       item.classList.add("active");
       const targetId = item.getAttribute("data-target");
       document.getElementById(targetId).classList.add("active");
@@ -367,19 +295,15 @@ function initAnimatedBackground() {
   for (let i = 0; i < 20; i++) {
     const cube = document.createElement("div");
     cube.classList.add("cube");
-
-    // Random properties
     const size = Math.random() * 60 + 20;
     const left = Math.random() * 100;
     const duration = Math.random() * 20 + 10;
     const delay = Math.random() * 10;
-
     cube.style.width = `${size}px`;
     cube.style.height = `${size}px`;
     cube.style.left = `${left}vw`;
     cube.style.animationDuration = `${duration}s`;
     cube.style.animationDelay = `${delay}s`;
-
     container.appendChild(cube);
   }
 }
@@ -388,19 +312,16 @@ function initAnimatedBackground() {
 // 4. RENDER FUNCTIONS
 // ==========================================
 function renderDashboard() {
-  // If firebase is configured, you would listen to collections here.
-  // For now we calculate from mock data.
   const totalMembers = mockMembers.length;
   const totalAdmins = mockAdmins.length;
   const activeAdmins = mockAdmins.filter((a) => a.status === "active").length;
   const pendingAdmins = mockAdmins.filter((a) => a.status === "pending").length;
 
-  // Animate numbers
   animateValue("stat-members", 0, totalMembers, 1000);
   animateValue("stat-admins", 0, totalAdmins, 1000);
   animateValue("stat-active-admins", 0, activeAdmins, 1000);
   animateValue("stat-pending", 0, pendingAdmins, 1000);
-  animateValue("stat-daily", 0, 3, 1000); // Mock daily
+  animateValue("stat-daily", 0, 3, 1000); 
 }
 
 function renderAdmins(adminsData = mockAdmins) {
@@ -414,16 +335,14 @@ function renderAdmins(adminsData = mockAdmins) {
 
   adminsData.forEach((admin) => {
     let statusBadge = "";
-    if (admin.status === "active")
-      statusBadge = `<span class="badge badge-success">Active</span>`;
-    else if (admin.status === "pending")
-      statusBadge = `<span class="badge badge-warning">Pending</span>`;
+    if (admin.status === "active") statusBadge = `<span class="badge badge-success">Active</span>`;
+    else if (admin.status === "pending") statusBadge = `<span class="badge badge-warning">Pending</span>`;
     else statusBadge = `<span class="badge badge-danger">Blocked</span>`;
 
     const tr = document.createElement("tr");
-    const shortId =
-      admin.id.length > 8 ? admin.id.substring(0, 8) + "..." : admin.id;
+    const shortId = admin.id.length > 8 ? admin.id.substring(0, 8) + "..." : admin.id;
 
+    // Fixed Referral Link Generator 
     let referralIdentifier = admin.email ? admin.email.split("@")[0] : admin.id;
     let adminReferralLink = `https://mywebsite21.github.io/Ads-Point-BD/?ref=${referralIdentifier}`;
 
@@ -462,34 +381,39 @@ function renderMembers(membersData = mockMembers) {
   membersData.forEach((member) => {
     const tr = document.createElement("tr");
 
-    let referredByText =
-      '<span style="color:var(--text-light); opacity: 0.5;">Direct</span>';
+    let referredByText = '<span style="color:var(--text-light); opacity: 0.5;">Direct</span>';
+    
+    // Correctly fetching the referralAdmin field from your database
     const refSource =
+      member.referralAdmin || 
       member.referredBy ||
       member.referrer ||
       member.admin ||
-      member.ref ||
-      member.reference ||
-      member.referral ||
-      member.adminId ||
-      member.adminEmail ||
-      member.admin_id ||
-      member.refId;
+      member.ref;
 
-    if (refSource) {
-      const refUrl = `https://mywebsite21.github.io/Ads-Point-BD/?ref=${encodeURIComponent(refSource)}`;
+    // Update the UI to show the correct Link and Identifier
+    if (refSource && refSource.toLowerCase() !== "official" && refSource.toLowerCase() !== "direct traffic") {
+      // It will prioritize the exact link saved in DB. If not found, it generates it using your domain.
+      const refUrl = member.referralLink || `https://mywebsite21.github.io/Ads-Point-BD/?ref=${encodeURIComponent(refSource)}`;
+      
       referredByText = `
         <div style="display:flex; flex-direction:column; gap:4px;">
-          <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; display: inline-block; width: fit-content;">${refSource}</span>
-          <a href="${refUrl}" target="_blank" style="font-size: 0.75rem; color: #007bff; text-decoration: underline; white-space: nowrap;"><i class="fa-solid fa-link"></i> ${refUrl}</a>
+          <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; display: inline-block; width: fit-content; text-transform: none; font-size: 11px;">${refSource}</span>
+          <a href="${refUrl}" target="_blank" style="font-size: 0.75rem; color: #00d2ff; text-decoration: underline; white-space: nowrap;"><i class="fa-solid fa-link"></i> ${refUrl}</a>
+        </div>
+      `;
+    } else if (refSource && refSource.toLowerCase() === "official") {
+        referredByText = `
+        <div style="display:flex; flex-direction:column; gap:4px;">
+          <span class="badge" style="background: rgba(34, 197, 94, 0.2); color: #22c55e; display: inline-block; width: fit-content;">Official</span>
         </div>
       `;
     }
 
     tr.innerHTML = `
-            <td><strong>${member.name || member.fullName || "N/A"}</strong></td>
-            <td style="color:#38bdf8;">${member.telegram || member.telegramUsername || "N/A"}</td>
-            <td style="color:#4ade80;">${member.whatsapp || member.whatsappNumber || "N/A"}</td>
+            <td><strong>${member.fullName || member.name || "N/A"}</strong></td>
+            <td style="color:#38bdf8;">${member.telegramUsername || member.telegram || "N/A"}</td>
+            <td style="color:#4ade80;">${member.whatsappNumber || member.whatsapp || "N/A"}</td>
             <td>${referredByText}</td>
             <td>${member.joinedDate || "N/A"}</td>
             <td style="display:flex; gap: 0.5rem;">
@@ -500,13 +424,9 @@ function renderMembers(membersData = mockMembers) {
   });
 }
 
-// Render Permissions is now handled dynamically in the modal
-
 // ==========================================
 // 5. ACTIONS & UTILS
 // ==========================================
-
-// Global actions for onclick attributes
 window.approveAdmin = (id) => updateAdminStatus(id, "active");
 window.rejectAdmin = (id) => updateAdminStatus(id, "rejected");
 window.blockAdmin = (id) => updateAdminStatus(id, "blocked");
@@ -514,25 +434,16 @@ window.unblockAdmin = (id) => updateAdminStatus(id, "active");
 window.deleteAdmin = async (id) => {
   if (confirm("Are you sure you want to delete this admin?")) {
     try {
-      if (isFirebaseConfigured) {
-        await deleteDoc(doc(db, "admins", id));
-      } else {
+      if (isFirebaseConfigured) await deleteDoc(doc(db, "admins", id));
+      else {
         mockAdmins = mockAdmins.filter((a) => a.id !== id);
         renderAdmins();
         renderDashboard();
       }
     } catch (error) {
-      console.warn("Delete Admin Error:", error);
       alert("Error deleting admin: " + error.message);
     }
   }
-};
-
-window.viewMember = (id) => {
-  const mem = mockMembers.find((m) => m.id === id);
-  alert(
-    `Member Details:\nName: ${mem.name || mem.username || "Unknown"}\nTelegram: ${mem.telegram || "N/A"}\nWhatsApp: ${mem.whatsapp || "N/A"}\nJoined: ${mem.joinedDate}`,
-  );
 };
 
 let memberToDelete = null;
@@ -556,17 +467,14 @@ window.openAdminSettings = (id) => {
   if (!admin) return;
 
   currentEditingAdminId = id;
-  const adminName =
-    admin.email || admin.name || admin.username || admin.id || "Admin";
-  document.getElementById("modal-admin-name").innerText =
-    `Permissions: ${adminName}`;
+  const adminName = admin.email || admin.id || "Admin";
+  document.getElementById("modal-admin-name").innerText = `Permissions: ${adminName}`;
 
   const container = document.getElementById("modal-permissions-container");
   container.innerHTML = "";
 
   permissionDefinitions.forEach((permDef) => {
     const isActive = admin.permissions[permDef.id] || false;
-
     const wrapper = document.createElement("div");
     wrapper.className = "toggle-wrapper";
     wrapper.innerHTML = `
@@ -578,7 +486,6 @@ window.openAdminSettings = (id) => {
         `;
     container.appendChild(wrapper);
   });
-
   document.getElementById("admin-modal").classList.add("active");
 };
 
@@ -592,8 +499,6 @@ window.toggleAdminPermission = async (adminId, permId) => {
   if (admin) {
     try {
       const newState = !admin.permissions[permId];
-
-      // Optimistic UI update
       admin.permissions[permId] = newState;
       const el = document.getElementById(`toggle-${adminId}-${permId}`);
       if (newState) el.classList.add("active");
@@ -605,14 +510,7 @@ window.toggleAdminPermission = async (adminId, permId) => {
         });
       }
     } catch (error) {
-      console.warn("Toggle Permission Error:", error);
       alert("Error updating permission: " + error.message);
-
-      // Revert changes on error
-      admin.permissions[permId] = !admin.permissions[permId];
-      const el = document.getElementById(`toggle-${adminId}-${permId}`);
-      if (admin.permissions[permId]) el.classList.add("active");
-      else el.classList.remove("active");
     }
   }
 };
@@ -620,15 +518,11 @@ window.toggleAdminPermission = async (adminId, permId) => {
 async function updateAdminStatus(id, status) {
   try {
     if (isFirebaseConfigured) {
-      if (status === "rejected") {
-        await deleteDoc(doc(db, "admins", id));
-      } else {
-        await updateDoc(doc(db, "admins", id), { status: status });
-      }
+      if (status === "rejected") await deleteDoc(doc(db, "admins", id));
+      else await updateDoc(doc(db, "admins", id), { status: status });
     } else {
-      if (status === "rejected") {
-        mockAdmins = mockAdmins.filter((a) => a.id !== id);
-      } else {
+      if (status === "rejected") mockAdmins = mockAdmins.filter((a) => a.id !== id);
+      else {
         const admin = mockAdmins.find((a) => a.id === id);
         if (admin) admin.status = status;
       }
@@ -636,27 +530,17 @@ async function updateAdminStatus(id, status) {
       renderDashboard();
     }
   } catch (error) {
-    console.warn("Update Status Error:", error);
-    alert(
-      "Action failed: " +
-        error.message +
-        "\n\nMake sure you are logged in and have Master Admin rights.",
-    );
+    alert("Action failed: " + error.message);
   }
 }
 
 function handleAdminSearch() {
   const type = document.getElementById("admin-search-type").value;
-  const query = document
-    .getElementById("admin-search-input")
-    .value.toLowerCase();
-
+  const query = document.getElementById("admin-search-input").value.toLowerCase();
   if (!query) return renderAdmins(mockAdmins);
 
   const filtered = mockAdmins.filter((a) => {
     if (type === "email") return (a.email || "").toLowerCase().includes(query);
-    if (type === "username")
-      return (a.username || "").toLowerCase().includes(query);
     if (type === "id") return (a.id || "").toLowerCase().includes(query);
     return false;
   });
@@ -665,21 +549,13 @@ function handleAdminSearch() {
 
 function handleMemberSearch() {
   const type = document.getElementById("member-search-type").value;
-  const query = document
-    .getElementById("member-search-input")
-    .value.toLowerCase();
-
+  const query = document.getElementById("member-search-input").value.toLowerCase();
   if (!query) return renderMembers(mockMembers);
 
   const filtered = mockMembers.filter((m) => {
-    if (type === "name")
-      return (m.name || m.fullName || "").toLowerCase().includes(query);
-    if (type === "telegram")
-      return (m.telegram || m.telegramUsername || "")
-        .toLowerCase()
-        .includes(query);
-    if (type === "whatsapp")
-      return (m.whatsapp || "").toLowerCase().includes(query);
+    if (type === "name") return (m.fullName || m.name || "").toLowerCase().includes(query);
+    if (type === "telegram") return (m.telegramUsername || m.telegram || "").toLowerCase().includes(query);
+    if (type === "whatsapp") return (m.whatsappNumber || m.whatsapp || "").toLowerCase().includes(query);
     return false;
   });
   renderMembers(filtered);
@@ -687,10 +563,9 @@ function handleMemberSearch() {
 
 function exportMembersCSV() {
   let csvContent = "data:text/csv;charset=utf-8,";
-  csvContent += "ID,Name,Telegram,WhatsApp,Joined Date\n";
-
+  csvContent += "Name,Telegram,WhatsApp,Referred By,Joined Date\n";
   mockMembers.forEach((m) => {
-    csvContent += `${m.id},${m.name},${m.telegram},${m.whatsapp},${m.joinedDate}\n`;
+    csvContent += `${m.fullName || m.name || ""},${m.telegramUsername || m.telegram || ""},${m.whatsappNumber || m.whatsapp || ""},${m.referralAdmin || "Direct"},${m.joinedDate}\n`;
   });
 
   const encodedUri = encodeURI(csvContent);
@@ -705,12 +580,7 @@ function exportMembersCSV() {
 function handleLogout(e) {
   e.preventDefault();
   if (isFirebaseConfigured) {
-    signOut(auth)
-      .then(() => {
-        alert("Logged out successfully");
-        // window.location.href = "/login.html";
-      })
-      .catch((err) => alert("Logout failed: " + err.message));
+    signOut(auth).then(() => alert("Logged out successfully")).catch((err) => alert("Logout failed: " + err.message));
   } else {
     alert("Logged out successfully (Mock)");
   }
@@ -724,9 +594,7 @@ function animateValue(id, start, end, duration) {
     if (!startTimestamp) startTimestamp = timestamp;
     const progress = Math.min((timestamp - startTimestamp) / duration, 1);
     obj.innerHTML = Math.floor(progress * (end - start) + start);
-    if (progress < 1) {
-      window.requestAnimationFrame(step);
-    }
+    if (progress < 1) window.requestAnimationFrame(step);
   };
   window.requestAnimationFrame(step);
 }
